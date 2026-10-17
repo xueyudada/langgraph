@@ -1,0 +1,25 @@
+[project]
+name = "myLanggraph"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4>=4.15.0",
+    "chromadb>=1.5.9",
+    "docling>=2.110.0",
+    "docling-hierarchical-pdf>=0.1.8",
+    "faiss-cpu>=1.14.3",
+    "langchain>=1.3.11",
+    "langchain-chroma>=1.1.0",
+    "langchain-cohere>=0.6.0",
+    "langchain-community>=0.4.2",
+    "langchain-core>=1.4.8",
+    "langchain-nomic>=1.0.1",
+    "langchain-openai>=1.3.3",
+    "langchain-text-splitters>=1.1.2",
+    "langchainhub>=0.1.21",
+    "langgraph>=1.2.6",
+    "langsmith>=0.9.1",
+    "pydantic>=2.13.4",
+]

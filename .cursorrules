@@ -1,0 +1,11 @@
+# LangChain 学习与使用偏好
+
+- **优先使用 LangChain**：在后续所有的代码编写中，必须优先使用 LangChain 框架（如 `ChatOpenAI`, `SystemMessage`, `HumanMessage`, `ainvoke`, `astream` 等），而不是使用原生的底层 SDK（如原生的 `openai` 包）。
+- **LangChain 范式**：因为当前正在学习 LangChain，所以应当尽量采用 LangChain 的惯用写法（例如 LCEL 表达式、Prompt Templates、Output Parsers 等）来构建应用或调用大模型。
+
+# 生产环境标准与最佳实践 (Production-grade Standards)
+
+- **生产级代码**：后续所有生成的示例代码，**必须严格按照企业生产环境的标准编写**。
+- **异常处理与稳定性**：大模型 API 调用必须包含 `try...except` 代码块（重点捕获网络错误或接口超时），并且在初始化 LLM 客户端时，应配置 `max_retries` 和 `timeout` 机制。
+- **结构化输出约束 (Structured Output)**：当需要模型返回复杂数据（如 JSON/字典）时，不要仅在提示词中进行口头约束，必须使用 `Pydantic` 构建 `BaseModel` 数据模型，并结合 LangChain 的 `with_structured_output` 强制规范输出结构。
+

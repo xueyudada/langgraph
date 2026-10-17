@@ -1,0 +1,150 @@
+import os
+import asyncio
+from dotenv import load_dotenv
+
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
+from langchain_community.document_loaders import TextLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough, RunnableParallel
+from langchain_core.output_parsers import StrOutputParser
+
+# 1. 准备演示用的示例文档内容
+DEMO_DOC_CONTENT = """LangChain 是一个功能强大的框架，旨在帮助开发人员构建由大型语言模型 (LLM) 驱动的应用程序。
+它提供了诸如 Model I/O、Retrieval (RAG)、Chains 和 Agents 等核心模块。
+其中，LCEL (LangChain Expression Language) 是用于声明式链接 LangChain 组件的语言。
+
+LangGraph 是建立在 LangChain 之上的扩展库。
+它专门用于构建支持“循环” (Loops) 和“状态管理” (State Management) 的复杂多智能体 (Multi-Agent) 系统。
+如果你的 AI 应用需要复杂的决策流或反馈环，LangGraph 是更合适的选择。
+
+Model Context Protocol (MCP) 是近期推出的一项开放标准。
+它允许开发者构建标准的协议接口，使 AI 智能体 (Agents) 能够安全、一致地接入各种外部工具 and 数据源。"""
+
+# 加载环境变量
+load_dotenv()
+API_KEY = os.getenv("OPENAI_API_KEY")
+BASE_URL = os.getenv("OPENAI_BASE_URL")
+MODEL_NAME = os.getenv("MODEL_NAME", "gpt-4o")
+
+async def main():
+    print("🚀 === RAG 管道演示 (FAISS 本地持久化) === 🚀\n")
+    
+    # 检查配置
+    if not API_KEY:
+        print("⚠️ 警告: 未检测到 OPENAI_API_KEY 环境变量，请确保已在 .env 文件中正确配置。")
+        return
+
+    # 创建演示用文本文件
+    temp_filename = "demo_rag_source.txt"
+    with open(temp_filename, "w", encoding="utf-8") as f:
+        f.write(DEMO_DOC_CONTENT)
+        
+    try:
+        # ---- 步骤 1: 文档加载 (Document Loading) ----
+        print("--- 步骤 1: 加载文档 ---")
+        loader = TextLoader(temp_filename, encoding="utf-8")
+        docs = loader.load()
+        print(f"成功加载文档。文档字符长度: {len(docs[0].page_content)}\n")
+        
+        # ---- 步骤 2: 文本切分 (Text Splitting) ----
+        print("--- 步骤 2: 文本切分 (Chunking) ---")
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=80, 
+            chunk_overlap=20
+        )
+        splits = splitter.split_documents(docs)
+        print(f"文档已被切分为 {len(splits)} 个 Chunks。")
+        print()
+        
+        # ---- 步骤 3: 向量化与存储 (Embeddings & Vector Store) ----
+        print("--- 步骤 3: 向量化与构建索引 ---")
+        embeddings = OpenAIEmbeddings(
+            openai_api_key=os.getenv("EMBEDDINGS_API_KEY"),
+            openai_api_base=os.getenv("EMBEDDINGS_BASE_URL", "https://open.bigmodel.cn/api/paas/v4"),
+            model=os.getenv("EMBEDDINGS_MODEL_NAME", "embedding-3"),
+        )
+        
+        persist_directory = "./faiss_db"
+        
+        # FAISS 的持久化与加载
+        if os.path.exists(persist_directory):
+            print(f"检测到本地已存在已持久化的 FAISS 索引目录，正在从 '{persist_directory}' 加载...")
+            # 注意：在加载本地 FAISS 索引时，需要设置 allow_dangerous_deserialization=True，否则默认是不允许反序列化以防安全漏洞的
+            vectorstore = FAISS.load_local(
+                folder_path=persist_directory,
+                embeddings=embeddings,
+                allow_dangerous_deserialization=True
+            )
+            print("向量索引 (FAISS) 从本地加载成功。\n")
+        else:
+            print("本地未检测到 FAISS 索引，正在创建并持久化保存...")
+            vectorstore = FAISS.from_documents(splits, embeddings)
+            # 使用 save_local 保存到本地目录
+            vectorstore.save_local(persist_directory)
+            print(f"向量索引 (FAISS) 创建成功，并已通过 save_local 保存到: {persist_directory}\n")
+        
+        # ---- 步骤 4: 创建检索器 (Retriever) ----
+        print("--- 步骤 4: 创建检索器 ---")
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 2})
+        print("检索器创建完毕。\n")
+        
+        # ---- 步骤 5: 组装 RAG 链 (LCEL) ----
+        print("--- 步骤 5: 组装 LCEL RAG 链 ---")
+        
+        template = """你是一个专业的AI助手。请基于以下提供的上下文片段回答用户的问题。
+如果你在上下文中找不到答案，就诚实地说你不知道，不要胡乱编造。
+
+【上下文】：
+{context}
+
+【问题】：{question}
+【回答】："""
+        prompt = ChatPromptTemplate.from_template(template)
+        
+        llm = ChatOpenAI(
+            api_key=API_KEY, 
+            base_url=BASE_URL, 
+            model=MODEL_NAME,
+            temperature=0
+        )
+        
+        def format_docs(docs_list):
+            return "\n---\n".join(doc.page_content for doc in docs_list)
+
+        rag_chain = (
+            RunnableParallel({
+                "context": retriever | format_docs, 
+                "question": RunnablePassthrough()
+            })
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+        print("RAG 链组装完成。\n")
+        
+        # ---- 步骤 6: 测试运行 ----
+        question = "请问 LangGraph 有什么用？它的核心特点是什么？"
+        print(f"--- 步骤 6: 提问 ---")
+        print(f"问题: '{question}'")
+        
+        retrieved_docs = await retriever.ainvoke(question)
+        print("\n🔍 [检索器召回的文本片段]:")
+        for i, doc in enumerate(retrieved_docs):
+            print(f"  召回片段 {i+1}: {doc.page_content}")
+            
+        print("\n🤖 [大模型生成回答中...]")
+        answer = await rag_chain.ainvoke(question)
+        print(f"最终回答:\n{answer}")
+        
+    except Exception as e:
+        print(f"\n❌ 运行出错: {e}")
+        
+    finally:
+        if os.path.exists(temp_filename):
+            os.remove(temp_filename)
+            print("\n🧹 临时文件已清理。")
+
+if __name__ == "__main__":
+    asyncio.run(main())
